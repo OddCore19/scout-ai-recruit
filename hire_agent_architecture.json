@@ -1,0 +1,285 @@
+{
+  "flow_name": "Hire Agent Preliminary Screening",
+  "based_on": "Clean rebuild recommended; do not directly reuse the support-oriented backup flow",
+  "inputs": {
+    "job_description": {
+      "type": "file",
+      "cardinality": "single"
+    },
+    "candidate_cvs": {
+      "type": "file",
+      "cardinality": "multiple"
+    }
+  },
+  "outputs": {
+    "qualifying_candidates": "Candidates who pass hard requirements",
+    "top_k_recommended": "Ranked subset of qualifying candidates by fit score",
+    "recommended_candidate_summary": "LLM-generated comparison summary for the top-k recommended candidates"
+  },
+  "design_principles": [
+    "Use LLMs for extraction and reasoning, not for deterministic hard filters",
+    "Normalize both JD and CVs before comparison",
+    "Store evidence for every pass, fail, and score",
+    "Rank only candidates who pass hard requirements"
+  ],
+  "nodes": [
+    {
+      "id": "jd_file_input",
+      "component": "File",
+      "purpose": "Upload and parse a single JD"
+    },
+    {
+      "id": "cv_file_input",
+      "component": "File",
+      "purpose": "Upload and parse multiple CVs"
+    },
+    {
+      "id": "jd_extraction_prompt",
+      "component": "Prompt",
+      "purpose": "Instruction template for extracting job requirements"
+    },
+    {
+      "id": "jd_structured_output",
+      "component": "StructuredOutput",
+      "purpose": "Produce JobRequirementProfile",
+      "schema_ref": "JobRequirementProfile"
+    },
+    {
+      "id": "resume_file_splitter",
+      "component": "CustomPython",
+      "purpose": "Create one record per uploaded CV",
+      "outputs": [
+        "candidate_id",
+        "file_name",
+        "resume_text"
+      ]
+    },
+    {
+      "id": "candidate_loop",
+      "component": "LoopComponent",
+      "purpose": "Iterate over CVs one at a time"
+    },
+    {
+      "id": "candidate_extract_prompt",
+      "component": "Prompt",
+      "purpose": "Instruction template for extracting candidate facts"
+    },
+    {
+      "id": "candidate_structured_output",
+      "component": "StructuredOutput",
+      "purpose": "Produce CandidateProfile",
+      "schema_ref": "CandidateProfile"
+    },
+    {
+      "id": "hard_requirement_evaluator",
+      "component": "CustomPython",
+      "purpose": "Deterministically evaluate hard requirements",
+      "schema_ref": "HardFilterDecision"
+    },
+    {
+      "id": "fit_scoring_prompt",
+      "component": "Prompt",
+      "purpose": "Instruction template for fit scoring"
+    },
+    {
+      "id": "fit_scoring_structured_output",
+      "component": "StructuredOutput",
+      "purpose": "Produce FitAssessment",
+      "schema_ref": "FitAssessment"
+    },
+    {
+      "id": "candidate_result_merger",
+      "component": "CustomPython",
+      "purpose": "Join extraction, filter, and scoring outputs for one candidate"
+    },
+    {
+      "id": "qualifying_candidate_filter",
+      "component": "CustomPython",
+      "purpose": "Keep only candidates who passed hard filters"
+    },
+    {
+      "id": "top_k_ranker",
+      "component": "CustomPython",
+      "purpose": "Sort qualifying candidates by fit score and apply top-k"
+    },
+    {
+      "id": "recommendation_summary_prompt",
+      "component": "Prompt",
+      "purpose": "Instruction template for shortlist summary"
+    },
+    {
+      "id": "recommendation_summary_agent",
+      "component": "Agent",
+      "purpose": "Generate recruiter-facing summary of top-k recommendations"
+    },
+    {
+      "id": "final_formatter",
+      "component": "CustomPython",
+      "purpose": "Assemble final API response",
+      "schema_ref": "FinalOutput"
+    },
+    {
+      "id": "chat_output",
+      "component": "ChatOutput",
+      "purpose": "Return final structured result"
+    }
+  ],
+  "edges": [
+    ["jd_file_input", "jd_structured_output"],
+    ["jd_extraction_prompt", "jd_structured_output.system_prompt"],
+    ["cv_file_input", "resume_file_splitter"],
+    ["resume_file_splitter", "candidate_loop"],
+    ["candidate_loop.item", "candidate_structured_output"],
+    ["candidate_extract_prompt", "candidate_structured_output.system_prompt"],
+    ["jd_structured_output", "hard_requirement_evaluator"],
+    ["candidate_structured_output", "hard_requirement_evaluator"],
+    ["jd_structured_output", "fit_scoring_structured_output"],
+    ["candidate_structured_output", "fit_scoring_structured_output"],
+    ["hard_requirement_evaluator", "fit_scoring_structured_output"],
+    ["fit_scoring_prompt", "fit_scoring_structured_output.system_prompt"],
+    ["candidate_structured_output", "candidate_result_merger"],
+    ["hard_requirement_evaluator", "candidate_result_merger"],
+    ["fit_scoring_structured_output", "candidate_result_merger"],
+    ["candidate_result_merger", "candidate_loop"],
+    ["candidate_loop.done", "qualifying_candidate_filter"],
+    ["qualifying_candidate_filter", "top_k_ranker"],
+    ["top_k_ranker", "recommendation_summary_agent"],
+    ["recommendation_summary_prompt", "recommendation_summary_agent.system_prompt"],
+    ["qualifying_candidate_filter", "final_formatter"],
+    ["top_k_ranker", "final_formatter"],
+    ["recommendation_summary_agent", "final_formatter"],
+    ["final_formatter", "chat_output"]
+  ],
+  "schemas": {
+    "JobRequirementProfile": {
+      "role_title": "str",
+      "role_family": "str",
+      "required_skills": [
+        "str"
+      ],
+      "preferred_skills": [
+        "str"
+      ],
+      "required_years_experience": "int",
+      "required_education": [
+        "str"
+      ],
+      "required_certifications": [
+        "str"
+      ],
+      "required_location_constraints": [
+        "str"
+      ],
+      "required_work_authorization": [
+        "str"
+      ],
+      "required_industry_experience": [
+        "str"
+      ],
+      "responsibilities": [
+        "str"
+      ],
+      "fit_dimensions": [
+        "str"
+      ],
+      "top_k": "int"
+    },
+    "CandidateProfile": {
+      "candidate_id": "str",
+      "name": "str",
+      "email": "str",
+      "phone": "str",
+      "current_location": "str",
+      "work_authorization": "str",
+      "skills": [
+        "str"
+      ],
+      "education": [
+        "str"
+      ],
+      "certifications": [
+        "str"
+      ],
+      "years_experience": "int",
+      "titles": [
+        "str"
+      ],
+      "companies": [
+        "str"
+      ],
+      "industry_experience": [
+        "str"
+      ],
+      "summary": "str",
+      "evidence": {
+        "skills": [
+          "str"
+        ],
+        "experience": [
+          "str"
+        ],
+        "education": [
+          "str"
+        ]
+      }
+    },
+    "HardFilterDecision": {
+      "candidate_id": "str",
+      "passes_hard_requirements": "bool",
+      "hard_requirement_failures": [
+        "str"
+      ],
+      "hard_requirement_evidence": [
+        "str"
+      ]
+    },
+    "FitAssessment": {
+      "candidate_id": "str",
+      "fit_score": "float",
+      "dimension_scores": {
+        "skills_alignment": "float",
+        "relevant_experience": "float",
+        "industry_fit": "float",
+        "seniority_fit": "float",
+        "education_fit": "float"
+      },
+      "strengths": [
+        "str"
+      ],
+      "gaps": [
+        "str"
+      ],
+      "fit_rationale": "str"
+    },
+    "FinalOutput": {
+      "qualifying_candidates": [
+        {
+          "candidate_id": "str",
+          "name": "str",
+          "passes_hard_requirements": "bool",
+          "fit_score": "float",
+          "hard_requirement_evidence": [
+            "str"
+          ],
+          "fit_rationale": "str"
+        }
+      ],
+      "top_k_recommended": [
+        {
+          "rank": "int",
+          "candidate_id": "str",
+          "name": "str",
+          "fit_score": "float",
+          "strengths": [
+            "str"
+          ],
+          "gaps": [
+            "str"
+          ],
+          "summary": "str"
+        }
+      ],
+      "recommended_candidate_summary": "str"
+    }
+  }
+}
