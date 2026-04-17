@@ -14,8 +14,6 @@ Hybrid or onsite, based in Baltimore, MD, or Germantown, MD
 Work in person for part or all of the week, from one of the locations
 Internship
 Full-time
-US work authorization required
-Open to candidates with OPT/CPT
 Job description
 Job Title: AI Prompt Engineer (AI + Automation + Marketing)
 Location: Remote / Hybrid (USA Preferred)
@@ -55,7 +53,6 @@ Key Responsibilities
 🛠️ Required Skills
 
 ✅ Must-Have:
-
 Strong hands-on experience with:
 ChatGPT or similar LLMs
 Experience building prompts for:
@@ -64,23 +61,25 @@ Business use cases
 Understanding of:
 AI workflows
 Automation tools
-➕ Good to Have:
 
+➕ Good to Have:
 Experience with:
 n8n or Zapier
+CUDA
 Basic programming (Python / APIs)
 Experience in:
+Financials
 Digital marketing
 EdTech / Robotics domain
-📊 Key Performance Indicators (KPIs)
 
+📊 Key Performance Indicators (KPIs)
 Prompt accuracy and quality score
 Reduction in manual work via automation
 Lead generation improvement
 Content production speed
 Conversion impact
-💼 What We’re Looking For
 
+💼 What We’re Looking For
 System thinker (not just content writer)
 Problem solver with business mindset
 Hands-on builder (automation + execution)

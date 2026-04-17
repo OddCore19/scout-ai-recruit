@@ -1,59 +1,144 @@
-# Hire Agent Langflow Architecture
+# Scout AI Recruit Technical Specification
 
-## Why not reuse the current flow directly
+## 1. Purpose
 
-The existing [HR Recruiting (Backup).json](/Users/mengshangjun/Documents/cmu/14789/project/HR%20Recruiting%20%28Backup%29.json) is a support-quality workflow:
+Scout AI Recruit is a Langflow-based preliminary hiring screen that evaluates uploaded candidate CVs against an uploaded job description. The system is designed for recruiter-side triage, not final hiring decisions.
 
-- the first prompt evaluates customer support interactions
-- the first structured schema is for `Interaction ID`, `Issue resolved`, `Critical alert`
-- the downstream loop classifies text chunks rather than screening resumes
+The project produces three primary outputs:
 
-That means the current graph shape is not the right abstraction for hiring. The correct move is a clean rebuild with a few reusable component types rather than trying to retarget the current prompts.
+- `qualifying_candidates`: candidates that pass deterministic hard requirements
+- `top_k_recommended`: ranked shortlist from the qualifying pool
+- `recommended_candidate_summary`: recruiter-facing generative summary of the shortlisted candidates
 
-## Target product behavior
+## 2. Project Artifacts
 
-Inputs:
+Core project files:
 
-- one uploaded job description
-- one or more uploaded candidate CVs
+- [Hire Agent Preliminary Screening.json](/Users/mengshangjun/Documents/cmu/14789/project/Hire%20Agent%20Preliminary%20Screening.json): importable Langflow flow
+- [generate_hire_langflow.py](/Users/mengshangjun/Documents/cmu/14789/project/generate_hire_langflow.py): generator for the Langflow flow JSON
+- [components/vertex_ai_structured_output.py](/Users/mengshangjun/Documents/cmu/14789/project/components/vertex_ai_structured_output.py): Vertex AI structured output kernel
+- [components/vertex_ai.py](/Users/mengshangjun/Documents/cmu/14789/project/components/vertex_ai.py): Vertex AI model component source
+- [components/structured_ouput.py](/Users/mengshangjun/Documents/cmu/14789/project/components/structured_ouput.py): original generic structured output component
+- [gui.py](/Users/mengshangjun/Documents/cmu/14789/project/gui.py): Streamlit client for file upload and flow execution
 
-Outputs:
+## 3. Functional Scope
 
-- `qualifying_candidates`: candidates who satisfy hard requirements
-- `top_k_recommended`: ranked subset of qualifying candidates by fit score
-- `recommended_candidate_summary`: generative summary of the recommended candidates
+### 3.1 Inputs
 
-## Design principles
+- One job description file
+- One or more candidate CV files
+- Optional recruiter instruction text for the run
 
-- Keep hard-requirement filtering deterministic and auditable.
-- Use LLMs for extraction and fit reasoning, not for binary gating when a rule can do the job.
-- Normalize both JD and CVs into structured profiles before any comparison.
-- Score only candidates who pass hard filters.
-- Keep evidence with every decision so recruiters can inspect why a candidate passed or failed.
+### 3.2 Outputs
 
-## Proposed Langflow graph
+- Full list of candidates that satisfy hard requirements
+- Ranked top-k recommendation set
+- Natural-language summary of the recommendation set
 
-### 1. Inputs
+### 3.3 Non-goals
 
-`JD File Input` (`File`)
-- Single job description upload.
-- `advanced_mode=true`
-- `markdown=true` if parsing PDFs reliably helps.
+- Final hiring recommendation
+- Background checks
+- External enrichment from LinkedIn, GitHub, or web search
+- Interview scheduling or ATS writeback
 
-`CV File Input` (`File`)
-- Multi-file CV upload.
-- `advanced_mode=true`
-- keep uploaded files separate.
+## 4. Design Principles
 
-### 2. Job requirement extraction
+- Hard requirements must be deterministic and auditable.
+- LLMs should be used for extraction and fit reasoning, not binary screening logic that can be implemented as rules.
+- The job description and CVs must be normalized into structured profiles before any comparison.
+- All ranking decisions should preserve evidence and rationale.
+- The shortlist summary must only describe the returned candidates, not invent missing data.
 
-`JD Extraction Prompt` (`Prompt`)
-- Instructs the model to extract normalized hiring requirements from the JD.
+## 5. System Overview
 
-`JD Structured Output` (`StructuredOutput`)
-- Produces `JobRequirementProfile`.
+The system consists of four major stages:
 
-Schema:
+1. Job description ingestion and normalization
+2. Candidate resume ingestion and per-candidate screening
+3. Aggregation, qualification filtering, and ranking
+4. Shortlist summarization and API/UI presentation
+
+At runtime:
+
+1. The client uploads source files to Langflow `/api/v2/files`.
+2. The flow receives uploaded file paths through `tweaks` targeting the two `Read File` nodes.
+3. The flow parses, extracts, filters, scores, and summarizes.
+4. The client renders either structured JSON output or plain text fallback.
+
+## 6. Runtime Architecture
+
+### 6.1 Flow Name
+
+`Hire Agent Preliminary Screening`
+
+### 6.2 Node Inventory
+
+The current generated flow contains 21 nodes and 28 edges.
+
+Nodes:
+
+1. `File-JD001` (`JD File`)
+2. `File-CV001` (`CV Files`)
+3. `Prompt-JD001` (`JD Extraction Prompt`)
+4. `StructuredOutput-JD001` (`JD Structured Output`)
+5. `ResumeSplitter-001` (`Resume Splitter`)
+6. `Loop-CAND001` (`Candidate Loop`)
+7. `Prompt-CAND001` (`Candidate Extraction Prompt`)
+8. `CandidateContext-001` (`Candidate Context Formatter`)
+9. `StructuredOutput-CAND001` (`Candidate Structured Output`)
+10. `HardFilter-001` (`Hard Requirement Evaluator`)
+11. `Prompt-FIT001` (`Fit Scoring Prompt`)
+12. `FitContext-001` (`Fit Context Formatter`)
+13. `StructuredOutput-FIT001` (`Fit Structured Output`)
+14. `ResultMerger-001` (`Candidate Result Merger`)
+15. `QualifyingFilter-001` (`Qualifying Candidate Filter`)
+16. `TopK-001` (`Top-K Ranker`)
+17. `Prompt-SUM001` (`Recommendation Summary Prompt`)
+18. `SummaryContext-001` (`Summary Context Formatter`)
+19. `Agent-SUM001` (`Recommendation Summary Agent`)
+20. `FinalFormatter-001` (`Final Formatter`)
+21. `ChatOutput-001` (`Chat Output`)
+
+### 6.3 Execution Stages
+
+#### Stage A: Job Description Extraction
+
+- `File-JD001` reads the uploaded JD file.
+- `Prompt-JD001` provides extraction instructions.
+- `StructuredOutput-JD001` converts JD text into `JobRequirementProfile`.
+
+#### Stage B: Resume Fan-out and Candidate Normalization
+
+- `File-CV001` reads uploaded CV files.
+- `ResumeSplitter-001` splits the combined file content into one candidate record per file.
+- `Loop-CAND001` iterates over candidate records.
+- `CandidateContext-001` formats each record for structured extraction.
+- `Prompt-CAND001` provides candidate extraction instructions.
+- `StructuredOutput-CAND001` produces `CandidateProfile`.
+
+#### Stage C: Deterministic Screening and Fit Scoring
+
+- `HardFilter-001` compares `CandidateProfile` against `JobRequirementProfile`.
+- `FitContext-001` combines job profile, candidate profile, and hard filter decision.
+- `Prompt-FIT001` provides fit scoring instructions.
+- `StructuredOutput-FIT001` produces `FitAssessment`.
+- `ResultMerger-001` merges extraction, filtering, and fit outputs for the current candidate.
+- `Loop-CAND001` collects the merged candidate records.
+
+#### Stage D: Ranking and Summary
+
+- `QualifyingFilter-001` keeps only candidates with `passes_hard_requirements = true`.
+- `TopK-001` sorts qualifying candidates by `fit_score` and truncates to `top_k`.
+- `SummaryContext-001` prepares the shortlisted candidates as a summarization payload.
+- `Prompt-SUM001` provides summary instructions.
+- `Agent-SUM001` generates recruiter-facing narrative output.
+- `FinalFormatter-001` assembles the final response object.
+- `ChatOutput-001` publishes the result.
+
+## 7. Data Contracts
+
+### 7.1 JobRequirementProfile
 
 ```json
 {
@@ -73,32 +158,7 @@ Schema:
 }
 ```
 
-### 3. CV fan-out
-
-`Resume File Splitter` (`Custom Python Component`)
-- Input: uploaded CV file bundle.
-- Output: `DataFrame`, one row per uploaded CV.
-- Each row should contain:
-  - `candidate_id`
-  - `file_name`
-  - `resume_text`
-
-This component is the key missing piece in the current backup flow. Chunking text is not enough; the screening loop has to iterate per resume, not per text chunk.
-
-### 4. Per-candidate screening loop
-
-`Candidate Loop` (`LoopComponent`)
-- Iterates over one CV at a time.
-
-Inside the loop:
-
-`Candidate Extract Prompt` (`Prompt`)
-- Instructs the model to extract candidate facts only from the CV.
-
-`Candidate Structured Output` (`StructuredOutput`)
-- Produces `CandidateProfile`.
-
-Schema:
+### 7.2 CandidateProfile
 
 ```json
 {
@@ -124,43 +184,19 @@ Schema:
 }
 ```
 
-`Hard Requirement Evaluator` (`Custom Python Component`)
-- Inputs:
-  - `JobRequirementProfile`
-  - `CandidateProfile`
-- Output: `HardFilterDecision`
-
-Rules:
-
-- reject if missing any must-have skill
-- reject if below minimum years of experience
-- reject if missing required work authorization
-- reject if location constraints fail
-- optionally reject on required degree or certifications
-
-Schema:
+### 7.3 HardFilterDecision
 
 ```json
 {
   "candidate_id": "str",
+  "name": "str",
   "passes_hard_requirements": "bool",
   "hard_requirement_failures": ["str"],
   "hard_requirement_evidence": ["str"]
 }
 ```
 
-`Fit Scoring Prompt` (`Prompt`)
-- Used only after hard requirements are evaluated.
-- Prompts the model to assess preference fit across weighted dimensions.
-
-`Fit Scoring Structured Output` (`StructuredOutput`)
-- Inputs:
-  - `JobRequirementProfile`
-  - `CandidateProfile`
-  - `HardFilterDecision`
-- Output: `FitAssessment`
-
-Schema:
+### 7.4 FitAssessment
 
 ```json
 {
@@ -179,30 +215,7 @@ Schema:
 }
 ```
 
-### 5. Post-loop aggregation
-
-`Candidate Result Merger` (`Custom Python Component`)
-- Joins `CandidateProfile`, `HardFilterDecision`, and `FitAssessment` for each candidate.
-
-`Qualifying Candidate Filter` (`Custom Python Component`)
-- Keeps only candidates with `passes_hard_requirements=true`.
-
-`Top-K Ranker` (`Custom Python Component`)
-- Sorts qualifying candidates by `fit_score`.
-- Applies `top_k` from the JD profile, or a configured default.
-
-### 6. Final generative summary
-
-`Recommendation Summary Prompt` (`Prompt`)
-- Produces a recruiter-facing narrative over the ranked shortlist.
-
-`Recommendation Summary Agent` (`Agent` or `VertexAiModel + Prompt`)
-- Summarizes top-k recommended candidates only.
-
-`Final Formatter` (`Custom Python Component` or `StructuredOutput`)
-- Builds the final API response object.
-
-Schema:
+### 7.5 Final Output
 
 ```json
 {
@@ -231,94 +244,126 @@ Schema:
 }
 ```
 
-## Recommended node list
+## 8. Custom Components
 
-1. `JD File Input` (`File`)
-2. `CV File Input` (`File`)
-3. `JD Extraction Prompt` (`Prompt`)
-4. `JD Structured Output` (`StructuredOutput`)
-5. `Resume File Splitter` (`Custom Python`)
-6. `Candidate Loop` (`LoopComponent`)
-7. `Candidate Extract Prompt` (`Prompt`)
-8. `Candidate Structured Output` (`StructuredOutput`)
-9. `Hard Requirement Evaluator` (`Custom Python`)
-10. `Fit Scoring Prompt` (`Prompt`)
-11. `Fit Scoring Structured Output` (`StructuredOutput`)
-12. `Candidate Result Merger` (`Custom Python`)
-13. `Qualifying Candidate Filter` (`Custom Python`)
-14. `Top-K Ranker` (`Custom Python`)
-15. `Recommendation Summary Prompt` (`Prompt`)
-16. `Recommendation Summary Agent` (`Agent`)
-17. `Final Formatter` (`Custom Python` or `StructuredOutput`)
-18. `Chat Output` (`ChatOutput`)
+Project-specific custom components currently used in the generated flow:
 
-## Recommended edges
+- `ResumeSplitterComponent`
+- `CandidateContextFormatterComponent`
+- `VertexAIStructuredOutput`
+- `HardRequirementEvaluatorComponent`
+- `FitContextFormatterComponent`
+- `CandidateResultMergerComponent`
+- `QualifyingCandidateFilterComponent`
+- `TopKRankerComponent`
+- `SummaryContextFormatterComponent`
+- `FinalFormatterComponent`
 
-1. `JD File Input -> JD Structured Output`
-2. `JD Extraction Prompt -> JD Structured Output.system_prompt`
-3. `CV File Input -> Resume File Splitter`
-4. `Resume File Splitter -> Candidate Loop`
-5. `Candidate Loop.item -> Candidate Structured Output`
-6. `Candidate Extract Prompt -> Candidate Structured Output.system_prompt`
-7. `JD Structured Output -> Hard Requirement Evaluator`
-8. `Candidate Structured Output -> Hard Requirement Evaluator`
-9. `JD Structured Output -> Fit Scoring Structured Output`
-10. `Candidate Structured Output -> Fit Scoring Structured Output`
-11. `Hard Requirement Evaluator -> Fit Scoring Structured Output`
-12. `Fit Scoring Prompt -> Fit Scoring Structured Output.system_prompt`
-13. `Candidate Structured Output -> Candidate Result Merger`
-14. `Hard Requirement Evaluator -> Candidate Result Merger`
-15. `Fit Scoring Structured Output -> Candidate Result Merger`
-16. `Candidate Result Merger -> Candidate Loop`
-17. `Candidate Loop.done -> Qualifying Candidate Filter`
-18. `Qualifying Candidate Filter -> Top-K Ranker`
-19. `Top-K Ranker -> Recommendation Summary Agent`
-20. `Recommendation Summary Prompt -> Recommendation Summary Agent.system_prompt`
-21. `Qualifying Candidate Filter -> Final Formatter`
-22. `Top-K Ranker -> Final Formatter`
-23. `Recommendation Summary Agent -> Final Formatter`
-24. `Final Formatter -> Chat Output`
+## 9. Vertex AI Structured Output Kernel
 
-## Prompt guidance
+### 9.1 Motivation
 
-### JD extraction prompt
+The original generic structured output block relied on:
 
-- extract only explicit requirements from the JD
-- distinguish must-have from preferred
-- normalize synonyms
-- do not infer unavailable facts
+- `trustcall.create_extractor(...)`
+- `llm.with_structured_output(...)`
 
-### Candidate extraction prompt
+This produced unstable behavior with `gemini-2.5-flash` in the current Langflow setup. The project now includes a Vertex-specific structured output kernel to remove the `trustcall` dependency and align the structured extraction path with the Vertex AI model configuration used elsewhere in the project.
 
-- extract only evidence present in the CV
-- normalize skills and titles
-- keep evidence snippets for key claims
-- do not infer unstated qualifications
+### 9.2 Current Kernel
 
-### Fit scoring prompt
+Implementation:
 
-- score only if hard filter output is available
-- explain the score using requirement-aligned evidence
-- penalize missing preferred signals, not missing hard requirements already failed
+- [components/vertex_ai_structured_output.py](/Users/mengshangjun/Documents/cmu/14789/project/components/vertex_ai_structured_output.py)
 
-### Recommendation summary prompt
+Responsibilities:
 
-- summarize only top-k candidates
-- compare strengths and tradeoffs across the shortlist
-- avoid absolute hiring claims
+- build `ChatVertexAI` with project, location, credentials, and sampling parameters
+- compile the table schema into a Pydantic model
+- wrap the schema inside an outer `objects: list[...]` container
+- invoke `with_structured_output(...)`
+- normalize outputs into Langflow `Data` or `DataFrame`
 
-## Implementation notes
+### 9.3 Current Limitation
 
-- Do not use Tavily or external search in the initial version.
-- Keep enrichment optional and out of the critical path.
-- The most important custom components are:
-  - `Resume File Splitter`
-  - `Hard Requirement Evaluator`
-  - `Candidate Result Merger`
-  - `Qualifying Candidate Filter`
-  - `Top-K Ranker`
-- If you want explainability, persist all intermediate structured outputs.
+In the current Langflow import path, prompt-to-custom-component connections targeting `system_prompt` may be dropped as invalid even though the field exists in the component template. The technical workaround is to keep instruction text directly in the node default values when necessary.
 
-## Recommendation
+## 10. Screening Logic
 
-Treat the current backup JSON as reference only. Build a new flow for hiring rather than editing the support-analysis graph in place.
+### 10.1 Deterministic Hard Filter
+
+The hard requirement evaluator currently checks:
+
+- missing required skills
+- minimum years of experience
+- required work authorization
+- required location constraints
+- required certifications
+
+The hard filter produces explicit failures and supporting evidence. A candidate only enters the ranking pool if all active hard checks pass.
+
+### 10.2 Fit Scoring
+
+Fit scoring is LLM-assisted and should only evaluate candidates relative to:
+
+- skills alignment
+- relevant experience
+- industry fit
+- seniority fit
+- education fit
+
+If a candidate fails hard requirements, the fit stage may still produce output for traceability, but downstream qualification filtering removes the candidate from the ranked pool.
+
+## 11. API and Client Integration
+
+### 11.1 File Uploads
+
+The Streamlit client uploads source files to:
+
+- `POST /api/v2/files`
+
+The returned `path` values are sent into the flow through `tweaks`.
+
+### 11.2 Flow Invocation
+
+The client runs the flow with:
+
+- `POST /api/v1/run/<flow_id>`
+
+The current UI uses the two file component IDs:
+
+- `File-JD001`
+- `File-CV001`
+
+### 11.3 UI Behavior
+
+The Streamlit client:
+
+- uploads JD and CV files
+- injects uploaded file paths into Langflow
+- runs the flow
+- attempts to parse the response as structured JSON
+- renders shortlist cards, metrics, and candidate tables when structured output is returned
+- falls back to plain text otherwise
+
+## 12. Operational Assumptions
+
+- Langflow is running locally and reachable from the Streamlit app.
+- The configured flow ID exists and matches the generated flow.
+- `LANGFLOW_API_KEY` is available in the environment.
+- Vertex AI credentials are provided either through the component file input or the runtime environment.
+
+## 13. Risks and Open Issues
+
+- Langflow import behavior for custom component prompt handles is inconsistent.
+- The Vertex AI structured output kernel is syntax-checked locally but not fully validated against every installed Langflow environment.
+- The recommendation summary agent remains generative and can still vary between runs.
+- The flow currently avoids external enrichment, which limits validation against candidate public profiles.
+
+## 14. Future Work
+
+- Replace prompt-edge dependence with baked-in node defaults or a more robust custom input contract.
+- Add native Vertex/Gemini JSON schema mode if direct API support is preferable to `with_structured_output`.
+- Add role-specific configurable hard filters and weights.
+- Add evaluation fixtures and regression tests for extraction and ranking quality.
+- Add persistence or ATS integration if the project moves beyond prototype stage.

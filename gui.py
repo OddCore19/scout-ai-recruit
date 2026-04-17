@@ -8,8 +8,8 @@ import streamlit as st
 
 LANGFLOW_RUN_URL = "http://localhost:7860/api/v1/run/4ac79b81-26b2-4501-910d-e4805cf3b98e"
 API_KEY = os.getenv("LANGFLOW_API_KEY", "")
-JD_COMPONENT_ID = "File-JD001"
-CV_COMPONENT_ID = "File-CV001"
+JD_COMPONENT_ID = "File-Yii2y"
+CV_COMPONENT_ID = "File-uqa34"
 
 
 def get_langflow_base_url(run_url: str) -> str:
