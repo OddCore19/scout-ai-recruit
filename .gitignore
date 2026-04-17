@@ -4,3 +4,4 @@ __pycache__/
 .streamlit/
 *.log
 *.env
+test_assets/resume_shangjun.pdf
